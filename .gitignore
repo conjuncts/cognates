@@ -1,0 +1,6 @@
+*.pkl
+*.json
+*.csv
+*.xml.bz2
+*.txt
+*.pyc
