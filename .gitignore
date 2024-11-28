@@ -4,3 +4,5 @@
 *.xml.bz2
 *.txt
 *.pyc
+
+*.parquet
