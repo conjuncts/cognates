@@ -23,7 +23,20 @@ const langnames = {
   'fro': 'Old French',
   'grc': 'Ancient Greek',
   'ine-pro': 'Proto-Indo-European',
-  'itc-pro': 'Proto-Italic'
+  'itc-pro': 'Proto-Italic',
+
+  'de': 'German',
+  'gmw-hgm': 'High German',
+  'gmw-lgm': 'Low German', 
+  'goh': 'Old High German', 
+  'gml': 'Middle Low German', 
+  'gmh': 'German Low German', 
+  'gem': 'Germanic', 
+  'gmq': 'North Germanic',
+  'osx': 'Old Saxon',
+
+  'gmw-pro': 'Proto-West Germanic',
+  'gem-pro': 'Proto-Germanic',
 } as Record<string, string>;
 
 const EtymologyVisualizer = () => {
@@ -360,6 +373,8 @@ const EtymologyVisualizer = () => {
                 <SelectItem className="cursor-pointer" value="pt">Portuguese</SelectItem>
                 <SelectItem className="cursor-pointer" value="fr">French</SelectItem>
                 <SelectItem className="cursor-pointer" value="it">Italian</SelectItem>
+                <SelectItem className="cursor-pointer" value="de">German</SelectItem>
+                <SelectItem className="cursor-pointer" value="nl">Dutch</SelectItem>
               </SelectContent>
             </Select>
             <span className="self-center">→</span>
