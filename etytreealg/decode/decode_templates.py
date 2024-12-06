@@ -109,8 +109,16 @@ def reinsert_affix_hyphen(tname, tkey, word, maximal_suffix=None):
     else:
         return word
     if is_prefix:
+        if word.endswith('-'):
+            return word
+        
         return word + '-'
     elif is_suffix:
+        if word.startswith('-'):
+            return word
+        if word.startswith('*-'):
+            return word
+        
         if word.startswith('*'):
             return '*-' + word[1:]
                 # wow this sucks

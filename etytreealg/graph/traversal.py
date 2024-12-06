@@ -5,6 +5,10 @@ from typing import Literal, Tuple, Set
 
 EdgeDirection = Literal['outgoing', 'incoming', 'both']
 
+_usage_log = {
+    'node_query': 0,
+    'edge_query': 0
+}
 def process_edges(
     edge_ids: list[int],
     edges_df: pl.DataFrame,
@@ -30,7 +34,10 @@ def process_edges(
     if edge_ids is None:
         return
     for edge_id in edge_ids:
-        row = edges_df.row(edge_id, named=True)
+        # row = edges_df.row(edge_id, named=True)
+        row = edges_df.filter(pl.col('edge_id') == edge_id).row(0, named=True)
+        global _usage_log
+        _usage_log['edge_query'] += 1
         # Get source and target information
 
         if take_parent:
@@ -104,14 +111,28 @@ def explore_word_graph(
     visited.add(start_idx)
     
     # Add first node
-    (_, start_word, start_lang, _, _) = vertex_df.row(start_idx)
+    # (_, start_word, start_lang, _, _)
+    row = vertex_df.row(start_idx, named=True)
+    start_word = row['word']
+    start_lang = row['lang']
     G.add_node(f"{start_word} ({start_lang})", root=True)
     
     while queue and len(G.nodes) < max_vertices:
         current_idx = queue.popleft()
 
-        _i, current_word, current_lang, ansc_eids, desc_eids = vertex_df.row(current_idx)
+        # _i, current_word, current_lang, ansc_eids, desc_eids = vertex_df.row(current_idx)
+        # row = vertex_df.row(current_idx, named=True)
+        row = vertex_df.filter(pl.col('vertex_id') == current_idx).row(0, named=True)
+        current_word = row['word']
+        current_lang = row['lang']
+        ansc_eids = (row['ancestral_edge_ids'] or []) + (row['desc_ancestral_edge_ids'] or [])
+
+
+        desc_eids = (row['descendant_edge_ids'] or []) + (row['desc_descendant_edge_ids'] or [])
+        _i = row['vertex_id']
         assert current_idx == _i
+        global _usage_log
+        _usage_log['node_query'] += 1
 
         if not word_rules(current_word):
             continue
@@ -122,7 +143,8 @@ def explore_word_graph(
         # Find and process edges based on language rules
         if direction in ('ancestors', 'both'): # outgoing
             # vertices is faster because we get the adjacency list
-            process_edges(ansc_eids, edges_df, visited, queue, G, max_vertices, template_rules, take_parent=True, self_id=current_idx)
+            process_edges(ansc_eids, edges_df, visited, queue, G, max_vertices, template_rules, 
+                          take_parent=True, self_id=current_idx)
             
         if direction in ('descendants', 'both'): # incoming
             process_edges(desc_eids, edges_df, visited, queue, G, max_vertices, template_rules, take_parent=False, self_id=current_idx)
@@ -132,6 +154,8 @@ def explore_word_graph(
 
 
 # Create graph
+_romance_expands = ['la', 'enm', 'ang', 'frm', 'fro']
+_germanic_expands = ['gmw-hgm', 'gmw-lgm', 'goh', 'gml', 'gmh', 'gem', 'gmq', 'osx']
 def lang_rules(langcode):
     rules = {
         'es': 'ancestors',
@@ -265,12 +289,29 @@ def graph_sugiyama_improved(G):
 if __name__ == "__main__":
     vertex_df = pl.read_parquet('data/parquet/spanish_vertices.parquet')
     edges_df = pl.read_parquet('data/parquet/spanish_edges.parquet')
+    # with pl.Config(tbl_cols=-1):
+    #     print(vertex_df)
+    #     print(edges_df)
+    # exit(0)
 
     starter = vertex_df.filter((pl.col('lang') == 'es') & (pl.col('word') == 'escoger'))['vertex_id'][0]
     print(starter)
+
+    def lang_policy(lang):
+        if lang in _romance_expands:
+            return 'both'
+        if lang in _germanic_expands:
+            return 'both'
+        return lang_rules(lang)
     graph = explore_word_graph(edges_df, vertex_df, starter, 
-                               lang_rules=lang_rules, word_rules=_word_rules, template_rules=_template_rules, max_vertices=100)
+                               lang_rules=lang_policy, word_rules=_word_rules, template_rules=_template_rules, 
+                               max_vertices=500)
+    print(_usage_log)
     pruned_graph = prune_leaves(graph, {'en'}, max_iterations=10) # {'en', 'es', 'osp', 'la', 'enm', 'ine-pro', 'gmw-pro'})
     graph_sugiyama_improved(pruned_graph)
+
+    from networkx.readwrite import json_graph
+    data = json_graph.node_link_data(pruned_graph)
+    print(data)
     # x = input("Press Enter to exit")
     # print(x)
