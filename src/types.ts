@@ -12,6 +12,7 @@ export type CytoNode = {
     word: string;
     lang: string;
     root?: boolean;
+    depth?: number;
   }
 };
 

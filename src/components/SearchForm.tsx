@@ -12,10 +12,11 @@ type SearchFormProps = {
   setCollectLang: (lang: string) => void;
   loading: boolean;
   onSubmit: () => void;
+  textResubmit: boolean;
 };
 
 export const SearchForm = ({
-  word, setWord, lang, setLang, collectLang, setCollectLang, loading, onSubmit
+  word, setWord, lang, setLang, collectLang, setCollectLang, loading, onSubmit, textResubmit
 }: SearchFormProps) => {
   return (
     <form
@@ -59,7 +60,7 @@ export const SearchForm = ({
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             Loading
           </>
-        ) : 'Search'}
+        ) : (textResubmit ? 'Search' : 'Search')}
       </Button>
     </form>
   );

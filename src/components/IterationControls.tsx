@@ -1,17 +1,24 @@
 import { Input } from "@/components/ui/input";
+import { Toggle } from "@/components/ui/toggle";
+import { Switch } from "./ui/switch";
+import { Label } from "./ui/label";
 
 type IterationControlsProps = {
   branchingIterations: number;
   setBranchingIterations: (n: number) => void;
   pruningIterations: number;
   setPruningIterations: (n: number) => void;
+  doTR: boolean; // transitive reduction
+  setDoTR: (n: boolean) => void; 
 };
 
 export const IterationControls = ({
   branchingIterations,
   setBranchingIterations,
   pruningIterations,
-  setPruningIterations
+  setPruningIterations,
+  doTR,
+  setDoTR
 }: IterationControlsProps) => {
   return (
     <div className="flex gap-4 mb-6">
@@ -41,6 +48,16 @@ export const IterationControls = ({
           max="5"
           value={pruningIterations}
           onChange={(e) => setPruningIterations(Number(e.target.value))}
+        />
+      </div>
+      <div className="flex flex-row ml-auto items-center">
+        <Label htmlFor="trans-red" className="mr-2 text-sm font-medium">
+          Transitive Reduction:
+        </Label>
+        <Switch
+          id="trans-red"
+          checked={doTR}
+          onCheckedChange={(checked) => setDoTR(checked)}
         />
       </div>
     </div>

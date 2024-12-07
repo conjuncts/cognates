@@ -19,11 +19,13 @@ const EtymologyVisualizer = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [graphData, setGraphData] = useState<CytoData>({ nodes: [], edges: [] });
+  const [graphQueryDepth, setGraphQueryDepth] = useState<number | null>(null);
   const [branchingIterations, setBranchingIterations] = useState(2);
   const [pruningIterations, setPruningIterations] = useState(1);
   const [wiktionaryUrl, setWiktionaryUrl] = useState<string | null>(null);
   const [isWiktVisible, setIsWiktVisible] = useState(true);
   const [wiktLoading, setWiktLoading] = useState(false);
+  const [doTR, setDoTR] = useState(true); // do transitive reduction
   const cyRef = useRef<cytoscape.Core | null>(null);
 
   // ... fetchEtymology and initializeCytoscape functions remain here
@@ -50,6 +52,7 @@ const EtymologyVisualizer = () => {
       }
       const processed = processDataForGraph(data);
       setGraphData(processed);
+      setGraphQueryDepth(branchingIterations);
     } catch (err) {
       setError('Failed to fetch etymology data. Please try again.');
     } finally {
@@ -59,7 +62,7 @@ const EtymologyVisualizer = () => {
 
   const initializeCytoscape = useCallback(() => {
     if (!cyRef.current) {
-      const processed = processDataForLayouting(graphData, collectLang, pruningIterations);
+      const processed = processDataForLayouting(graphData, collectLang, pruningIterations, branchingIterations, doTR);
       // console.log(processed);
       // cyRef.current.add([...graphData.nodes, ...graphData.edges]);
 
@@ -146,12 +149,12 @@ const EtymologyVisualizer = () => {
     } else {
       // Update elements if Cytoscape instance already exists
       cyRef.current.elements().remove();
-      const processed = processDataForLayouting(graphData, collectLang, pruningIterations);
+      const processed = processDataForLayouting(graphData, collectLang, pruningIterations, branchingIterations, doTR);
       // cyRef.current.add([...graphData.nodes, ...graphData.edges]);
       cyRef.current.add([...processed.nodes, ...processed.edges]);
       cyRef.current.layout({ name: 'dagre', rankDir: 'TB' } as cytoscape.LayoutOptions).run();
     }
-  }, [graphData, pruningIterations]);
+  }, [graphData, pruningIterations, branchingIterations, doTR]);
 
   useEffect(() => {
     if (graphData.nodes.length > 0) {
@@ -175,6 +178,7 @@ const EtymologyVisualizer = () => {
             setCollectLang={setCollectLang}
             loading={loading}
             onSubmit={fetchEtymology}
+            textResubmit={graphQueryDepth !== null && branchingIterations > graphQueryDepth}
           />
 
           <IterationControls
@@ -182,6 +186,8 @@ const EtymologyVisualizer = () => {
             setBranchingIterations={setBranchingIterations}
             pruningIterations={pruningIterations}
             setPruningIterations={setPruningIterations}
+            doTR={doTR}
+            setDoTR={setDoTR}
           />
 
           {error && (
