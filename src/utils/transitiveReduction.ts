@@ -69,8 +69,10 @@ export function transitive_reduction(
     }
   }
 
-  // Create the condensed DAG
+  // Create the condensed DAG and track original edges
   const sccAdjList = new Map<string, Set<string>>();
+  // Map from (sccFrom, sccTo) to array of [originalFrom, originalTo] pairs
+  const originalEdges = new Map<string, Array<[string, string]>>();
   
   for (const [node, neighbors] of Object.entries(adjacencyList)) {
     const sccFrom = nodeToScc.get(node)!;
@@ -82,6 +84,13 @@ export function transitive_reduction(
           sccAdjList.set(sccFrom, new Set());
         }
         sccAdjList.get(sccFrom)!.add(sccTo);
+        
+        // Track original edges
+        const key = `${sccFrom},${sccTo}`;
+        if (!originalEdges.has(key)) {
+          originalEdges.set(key, []);
+        }
+        originalEdges.get(key)!.push([node, neighbor]);
       }
     }
   }
@@ -134,7 +143,7 @@ export function transitive_reduction(
   const reducedAdjList: Record<string, string[]> = {};
   
   // First, add edges within SCCs (they're all needed)
-  for (const [sccId, members] of sccMembers.entries()) {
+  for (const [_, members] of sccMembers.entries()) {
     if (members.size > 1) {
       for (const member of members) {
         reducedAdjList[member] = [];
@@ -163,14 +172,17 @@ export function transitive_reduction(
       }
       
       if (keepEdge) {
-        // Add one edge from the SCC to represent this connection
-        const fromNode = Array.from(sccMembers.get(scc)!)[0];
-        const toNode = Array.from(sccMembers.get(neighbor)!)[0];
+        // Get original edges between these SCCs
+        const key = `${scc},${neighbor}`;
+        const edges = originalEdges.get(key)!;
         
-        if (!reducedAdjList[fromNode]) {
-          reducedAdjList[fromNode] = [];
+        // Add all original edges between these SCCs
+        for (const [fromNode, toNode] of edges) {
+          if (!reducedAdjList[fromNode]) {
+            reducedAdjList[fromNode] = [];
+          }
+          reducedAdjList[fromNode].push(toNode);
         }
-        reducedAdjList[fromNode].push(toNode);
       }
     }
   }

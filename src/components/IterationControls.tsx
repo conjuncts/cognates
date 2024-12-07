@@ -1,5 +1,4 @@
 import { Input } from "@/components/ui/input";
-import { Toggle } from "@/components/ui/toggle";
 import { Switch } from "./ui/switch";
 import { Label } from "./ui/label";
 
