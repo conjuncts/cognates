@@ -239,7 +239,7 @@ def script_parquet_to_csv(langname='spanish'):
     print("Reading Parquet files...")
     vertex_df = pl.read_parquet(f'data/parquet/{langname}_vertices.parquet')
     edges_df = pl.read_parquet(f'data/parquet/{langname}_edges.parquet')
-    desc_edges_df = pl.read_parquet(f'data/parquet/{langname}_desc_edges.parquet')
+    # desc_edges_df = pl.read_parquet(f'data/parquet/{langname}_desc_edges.parquet')
 
 
     # so that we need to serve fewer languages, prune edges if they are leaf nodes (modern languages)
@@ -252,7 +252,7 @@ def script_parquet_to_csv(langname='spanish'):
     pruned_df = vertex_df.filter([
         pl.col('lang').is_in(ok_modern_langs)
         | (pl.col('descendant_edge_ids').list.len() > 0)
-        | (pl.col('desc_descendant_edge_ids').list.len() > 0)
+        # | (pl.col('desc_descendant_edge_ids').list.len() > 0)
     ])
     ok_vertices = set(pruned_df['vertex_id'])
     # _dist = pruned_df['lang'].value_counts(sort=True)
@@ -260,39 +260,72 @@ def script_parquet_to_csv(langname='spanish'):
     # controversially removes: catalan, galician, scots, 
     # lots from middle/old english, afrikaans?, turkish, icelandic
     
+    edges_more_df = edges_df.with_columns(
+        pl.when(pl.col('is_desc')).then(pl.struct([
+            pl.col('host_word').alias('older_word'),
+            pl.col('host_lang').alias('older_lang'),
+            pl.col('other_word').alias('younger_word'),
+            pl.col('other_lang').alias('younger_lang'),
+        ])).otherwise(pl.struct([
+            pl.col('other_word').alias('older_word'),
+            pl.col('other_lang').alias('older_lang'),
+            pl.col('host_word').alias('younger_word'),
+            pl.col('host_lang').alias('younger_lang'),
+        ])).alias('youngins')
+    ).unnest('youngins')
+
+    anachronisms = edges_more_df.filter([
+        (pl.col('template_name') != 'cog')
+        & (
+            # italian is hella old
+            (pl.col('older_lang').is_in(['es', 'pt', 'fr']) & pl.col('younger_lang').is_in(
+                ['la', 'grc', 'fro', 'frm', 'osp', 'ine-pro', 'itc-pro']
+            ))
+            | (pl.col('older_lang').is_in(['en', 'de']) & pl.col('younger_lang').is_in(
+                ['la', 'grc', 'fro', 'osp', 'enm', 'ang', 'gmw-hgm', 'gmw-lgm', 
+                 'goh', 'gml', 'gmh', 'gem', 'gmq', 'osx', 'ine-pro', 'itc-pro']))
+        )
+    ])
+
     # then, we only need to modify edges_df. vertices_df can stay untouched
     # edges:
     edges_export_df = edges_df.filter([
         (pl.col('template_name') != 'cog') 
         & (pl.col('template_name') != 'cognate')
-        & (pl.col('host_id').is_in(ok_vertices))
-        & (pl.col('parent_id').is_in(ok_vertices))
+        # & (pl.col('host_id').is_in(ok_vertices))
+        # & (pl.col('parent_id').is_in(ok_vertices))
+        & (pl.col('younger').is_in(ok_vertices))
+        & (pl.col('older').is_in(ok_vertices))
 
     ]).select([
         # 'edge_id',
-        'host_id',
-        'parent_id'
-    ]).unique(['host_id', 'parent_id'], maintain_order=True) 
+        'younger',
+        'older'
+    ]).unique(['younger', 'older'], maintain_order=True) 
 
 
-    desc_edges_export_df = desc_edges_df.filter([
-        (pl.col('host_id').is_in(ok_vertices))
-        & (pl.col('descendant_id').is_in(ok_vertices))
-    ]).select([
-        'descendant_id',
-        'host_id',
-    ]).unique(['host_id', 'descendant_id'], maintain_order=True).rename({
-        'descendant_id': 'host_id',
-        'host_id': 'parent_id'
-    })
+    # desc_edges_export_df = desc_edges_df.filter([
+    #     (pl.col('host_id').is_in(ok_vertices))
+    #     & (pl.col('descendant_id').is_in(ok_vertices))
+    # ]).select([
+    #     'descendant_id',
+    #     'host_id',
+    # ]).unique(['host_id', 'descendant_id'], maintain_order=True).rename({
+    #     'descendant_id': 'host_id',
+    #     'host_id': 'parent_id'
+    # })
 
     edges_export_df = pl.concat([
         edges_export_df, 
-        desc_edges_export_df
-    ]).unique(['host_id', 'parent_id'], maintain_order=True).with_row_index('edge_id')
+        # desc_edges_export_df
+    ]).unique(['younger', 'older'], maintain_order=True).filter(
+        pl.col('younger') != pl.col('older') # remove self edges
+    ).rename({
+        'younger': 'host_id',
+        'older': 'parent_id'
+    }).with_row_index('edge_id')
 
-    # remove self edges
-    edges_export_df = edges_export_df.filter(pl.col('host_id') != pl.col('parent_id'))
+    
     print(edges_export_df)
 
     vertex_export_df = vertex_df.select([
@@ -308,6 +341,8 @@ def script_parquet_to_csv(langname='spanish'):
     vertex_export_df.write_csv(f'data/csv/{langname}_vertices.csv')
     print(vertex_export_df)
 
+    return vertex_export_df, edges_export_df
+
     # vertex_df.write_ipc('data/arrow/spanish_vertices.ipc')
     # edges_df.write_ipc('data/arrow/spanish_edges.ipc')
 
@@ -316,7 +351,9 @@ def script_parquet_to_csv(langname='spanish'):
 def main():
     # Read Parquet files
     # script_parquet_to_csv()
-    script_parquet_to_csv('spanish')
+    v, e = script_parquet_to_csv('spanish')
+    v.write_csv('data/csv/latest_vertices.csv')
+    e.write_csv('data/csv/latest_edges.csv')
 
     vertex_df = pl.read_csv('data/csv/german_vertices.csv')
     edges_df = pl.read_csv('data/csv/german_edges.csv')

@@ -3,7 +3,7 @@ import polars as pl
 import os
 from tqdm import tqdm
 
-from etytreealg.graph.graph_construct import construct_descendant_edges_df, construct_edges_df, construct_adjacency_dfs, most_common_referenced_languages
+from etytreealg.graph.graph_construct import construct_descendant_edges_df, construct_edges_df, construct_adjacency_dfs, construct_forms_of_df, construct_related_edges_df, most_common_referenced_languages
 from etytreealg.graph.graph_io import hydrate_df
 
 def probe_language_dependents():
@@ -25,6 +25,11 @@ def main():
     # probe_language_dependents()
 
     df = pl.read_parquet('data/parquet/ety_expanded.parquet')
+
+    forms_of_df = construct_forms_of_df(df)
+    forms_of_df.write_parquet('data/parquet/spanish_forms_of.parquet')
+    # print(forms_of_df)
+    exit(0)
     df = df.with_row_index("index")
     print("Loaded!")
     df = hydrate_df(df)
@@ -80,13 +85,6 @@ def main():
 
     # tempted to add: Catalan, Basque, Galician, Classical Nahuatl
 
-    desc_target_df = df.filter(
-        (pl.col("lang").is_in(target_langs)
-        #  | pl.col("lang_code").str.starts_with('roa-')
-         ) &
-        (pl.col("descendants_h").is_not_null())
-    )
-    weak_desc_edges_df = construct_descendant_edges_df(desc_target_df)
 
     # exit(0)
 
@@ -97,13 +95,29 @@ def main():
         (pl.col("num_templates") > 0)
     )
 
-    weak_edges_df = construct_edges_df(target_df)
+    # weak_form_of_df = construct_related_edges_df(target_df)
+    # print(weak_form_of_df)
+    # exit(0)
 
-    all_edges_df = pl.concat([weak_edges_df, weak_desc_edges_df])
+    weak_edges_df = construct_edges_df(target_df).drop('edge_id')
+
+    desc_target_df = df.filter(
+        (pl.col("lang").is_in(target_langs)
+        #  | pl.col("lang_code").str.starts_with('roa-')
+         ) &
+        (pl.col("descendants_h").is_not_null())
+    )
+    weak_desc_edges_df = construct_descendant_edges_df(desc_target_df).drop('edge_id')
+
+
+    all_edges_df = pl.concat([weak_edges_df, weak_desc_edges_df]).with_row_index("edge_id")
     # vertex_df, edges_df = construct_adjacency_dfs(weak_edges_df)
-    vertex_df, edges_df, desc_edges_df = construct_adjacency_dfs(all_edges_df) weak_edges_df, weak_desc_edges_df)
 
-    desc_edges_dest = 'data/parquet/spanish_desc_edges.parquet'
+    del df # free up memory
+    print("Constructing adjacency dfs...")
+    vertex_df, edges_df = construct_adjacency_dfs(all_edges_df) # weak_edges_df, weak_desc_edges_df)
+
+    # desc_edges_dest = 'data/parquet/spanish_desc_edges.parquet'
     edges_dest = 'data/parquet/spanish_edges.parquet'
     vertex_dest = 'data/parquet/spanish_vertices.parquet'
     
@@ -111,7 +125,7 @@ def main():
     # edges_dest = 'data/parquet/german_edges.parquet'
     # vertex_dest = 'data/parquet/german_vertices.parquet'
 
-    desc_edges_df.write_parquet(desc_edges_dest)
+    # desc_edges_df.write_parquet(desc_edges_dest)
     edges_df.write_parquet(edges_dest)
     vertex_df.write_parquet(vertex_dest)
 

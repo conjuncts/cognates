@@ -1,4 +1,12 @@
-Similar works
+
+
+
+
+These scripts date to 2024 December
+
+
+
+## Similar works
 
 Sagot, Benoit. (2017) Extracting an Etymological Database from Wiktionary 
 https://inria.hal.science/hal-01592061/file/paper44.pdf

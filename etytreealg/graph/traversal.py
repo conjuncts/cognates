@@ -15,10 +15,11 @@ def process_edges(
     visited: Set[Tuple[str, str]],
     queue: deque,
     graph: nx.Graph,
-    max_vertices: int,
+    # max_vertices: int,
     template_rules,
-    take_parent=True,
-    self_id=None # debug
+    take_younger=True,
+    self_id=None, # debug
+    depth=None,
 ) -> None:
     """
     Process edges and update the graph, visited set, and queue.
@@ -34,43 +35,54 @@ def process_edges(
     if edge_ids is None:
         return
     for edge_id in edge_ids:
-        # row = edges_df.row(edge_id, named=True)
-        row = edges_df.filter(pl.col('edge_id') == edge_id).row(0, named=True)
+        row = edges_df.row(edge_id, named=True)
+        assert row['edge_id'] == edge_id
+        # row = edges_df.filter(pl.col('edge_id') == edge_id).row(0, named=True)
         global _usage_log
         _usage_log['edge_query'] += 1
         # Get source and target information
 
-        if take_parent:
-            neighbor = (row['parent_word'], row['parent_lang'])
-            neighbor_id = row['parent_id']
+        edge_type = row['template_name']
+        if not template_rules(edge_type):
+            continue
+
+        if take_younger == row['is_desc']:
+            neighbor = (row['other_word'], row['other_lang'])
+            neighbor_id = row['other_id']
 
             self_node = (row['host_word'], row['host_lang'])
-            assert self_id == row['host_id']
+            assert self_id == row['host_id'], f"self_id {self_id} should be in {row}"
         else:
             neighbor = (row['host_word'], row['host_lang'])
             neighbor_id = row['host_id']
 
-            self_node = (row['parent_word'], row['parent_lang'])
-            assert self_id == row['parent_id']
+            self_node = (row['other_word'], row['other_lang'])
+            assert self_id == row['other_id'], f"self_id {self_id} should be in {row}"
+        
+        # other_label = f"{row['other_word']} ({row['other_lang']})"
+        # host_label = f"{row['host_word']} ({row['host_lang']})"
+        if not graph.has_node(f"{neighbor[0]} ({neighbor[1]})"):
+            graph.add_node(f"{neighbor[0]} ({neighbor[1]})", depth=depth+1)
 
-        edge_type = row['template_name']
-        if not template_rules(edge_type):
-            continue
+
+
         
         # Add the unvisited node to queue (either source or target)
         
-        if neighbor_id not in visited and len(graph.nodes) < max_vertices:
+        if neighbor_id not in visited: #  and len(graph.nodes) < max_vertices:
             visited.add(neighbor_id)
-            queue.append(neighbor_id)
+            queue.append((neighbor_id, depth+1))
             
             # Add nodes and edge to graph
-            parent_label = f"{row['parent_word']} ({row['parent_lang']})"
+            other_label = f"{row['other_word']} ({row['other_lang']})"
             host_label = f"{row['host_word']} ({row['host_lang']})"
-            graph.add_node(parent_label)
-            graph.add_node(host_label)
+            # graph.add_node(other_label)
+            # graph.add_node(host_label)
+
+            # if row['template_name'] not in ['cog', 'cognate']:
             graph.add_edge( # reverse edge: we say that the parent produces the host
-                parent_label,
-                host_label,
+                host_label if row['is_desc'] else other_label,
+                other_label if row['is_desc'] else host_label,
                 template=row['template_name']
             )
 
@@ -84,6 +96,7 @@ def explore_word_graph(
     word_rules,
     template_rules,
     max_vertices: int = 20,
+    max_depth: int = 4,
 ) -> nx.Graph:
     """
     Explore edges in a breadth-first manner starting from a given word/language pair.
@@ -104,7 +117,7 @@ def explore_word_graph(
     G = nx.DiGraph()
     
     # Queue for BFS
-    queue = deque([start_idx])
+    queue = deque([(start_idx, 0)])
     
     # Keep track of visited nodes
     visited: Set[int] = set()
@@ -117,18 +130,28 @@ def explore_word_graph(
     start_lang = row['lang']
     G.add_node(f"{start_word} ({start_lang})", root=True)
     
-    while queue and len(G.nodes) < max_vertices:
-        current_idx = queue.popleft()
+    last_valid_depth = None
+    while queue:
+
+        current_idx, depth = queue.popleft()
+
+        if depth > max_depth:
+            continue
+        if last_valid_depth is not None and depth > last_valid_depth:
+            continue
+        if len(G.nodes) + 1 >= max_vertices and last_valid_depth is None:
+            # need to stop at the next depth
+            last_valid_depth = depth # +1
 
         # _i, current_word, current_lang, ansc_eids, desc_eids = vertex_df.row(current_idx)
         # row = vertex_df.row(current_idx, named=True)
         row = vertex_df.filter(pl.col('vertex_id') == current_idx).row(0, named=True)
         current_word = row['word']
         current_lang = row['lang']
-        ansc_eids = (row['ancestral_edge_ids'] or []) + (row['desc_ancestral_edge_ids'] or [])
+        ansc_eids = (row['ancestral_edge_ids'] or []) # + (row['desc_ancestral_edge_ids'] or [])
 
 
-        desc_eids = (row['descendant_edge_ids'] or []) + (row['desc_descendant_edge_ids'] or [])
+        desc_eids = (row['descendant_edge_ids'] or []) # + (row['desc_descendant_edge_ids'] or [])
         _i = row['vertex_id']
         assert current_idx == _i
         global _usage_log
@@ -143,11 +166,12 @@ def explore_word_graph(
         # Find and process edges based on language rules
         if direction in ('ancestors', 'both'): # outgoing
             # vertices is faster because we get the adjacency list
-            process_edges(ansc_eids, edges_df, visited, queue, G, max_vertices, template_rules, 
-                          take_parent=True, self_id=current_idx)
+            process_edges(ansc_eids, edges_df, visited, queue, G, template_rules, 
+                          take_younger=False, self_id=current_idx, depth=depth)
             
         if direction in ('descendants', 'both'): # incoming
-            process_edges(desc_eids, edges_df, visited, queue, G, max_vertices, template_rules, take_parent=False, self_id=current_idx)
+            process_edges(desc_eids, edges_df, visited, queue, G, template_rules, 
+                          take_younger=True, self_id=current_idx, depth=depth)
 
 
     return G
@@ -162,6 +186,7 @@ def lang_rules(langcode):
         'osp': 'ancestors',
         'la': 'both',
         'enm': 'both',
+        'grc': 'both',
         # 'ine-pro': 'both',
         # 'gmw-pro': 'both',
     }
@@ -267,8 +292,21 @@ def graph_sugiyama_improved(G):
         # root is blue
         elif G.nodes[node].get('root', False):
             node_colors.append('red')
+        # else:
+        #     node_colors.append('lightblue')
+        # progressively lighter colors of blue depending on the depth
         else:
-            node_colors.append('lightblue')
+            # node_colors.append(f'lightblue{G.nodes[node].get("depth", 0) * 20}')
+            depth = G.nodes[node].get('depth', 0)
+            if depth <= 1:
+                node_colors.append('lightblue')
+            elif depth >= 2:
+                # node_colors.append('white')
+                node_colors.append(f'#BDE0EB')
+            elif depth == 3:
+                node_colors.append(f'#DEEFF5')
+            else:
+                node_colors.append(f'#EAF7FB')
 
     # Draw with modified parameters
     nx.draw(G, pos=poses,
@@ -286,6 +324,45 @@ def graph_sugiyama_improved(G):
     plt.tight_layout()
     plt.show()
 
+def graph_dagre(G):
+    import matplotlib.pyplot as plt
+    for layer, nodes in enumerate(nx.topological_generations(G)):
+        # `multipartite_layout` expects the layer as a node attribute, so add the
+        # numeric layer value as a node attribute
+        for node in nodes:
+            G.nodes[node]["layer"] = layer
+
+    # Compute the multipartite_layout using the "layer" node attribute
+    pos = nx.multipartite_layout(G, subset_key="layer")
+
+    # Create node color list based on language
+    node_colors = []
+    for node in G.nodes():
+        lang = node.split('(')[1].rstrip(')')
+        if lang == 'en':
+            node_colors.append('lightgreen')
+        # root is blue
+        elif G.nodes[node].get('root', False):
+            node_colors.append('red')
+        else:
+            depth = G.nodes[node].get('depth', 0)
+            if depth <= 1:
+                node_colors.append('lightblue')
+            elif depth >= 2:
+                # node_colors.append('white')
+                node_colors.append(f'#BDE0EB')
+            elif depth == 3:
+                node_colors.append(f'#DEEFF5')
+            else:
+                node_colors.append(f'#EAF7FB')
+            
+
+    fig, ax = plt.subplots()
+    nx.draw_networkx(G, pos=pos, ax=ax, node_color=node_colors)
+    ax.set_title("DAG layout in topological order")
+    fig.tight_layout()
+    plt.show()
+
 if __name__ == "__main__":
     vertex_df = pl.read_parquet('data/parquet/spanish_vertices.parquet')
     edges_df = pl.read_parquet('data/parquet/spanish_edges.parquet')
@@ -294,24 +371,33 @@ if __name__ == "__main__":
     #     print(edges_df)
     # exit(0)
 
-    starter = vertex_df.filter((pl.col('lang') == 'es') & (pl.col('word') == 'escoger'))['vertex_id'][0]
+    orig_lang = 'es'
+    starter = vertex_df.filter((pl.col('lang') == orig_lang) & (pl.col('word') == 'faena'))['vertex_id'][0]
     print(starter)
 
-    def lang_policy(lang):
-        if lang in _romance_expands:
-            return 'both'
-        if lang in _germanic_expands:
-            return 'both'
-        return lang_rules(lang)
+    def lang_policy(for_this_lang):
+        def what_we_want(lang):
+            if lang in _romance_expands:
+                return 'both'
+            if lang == 'de':
+
+                if lang in _germanic_expands:
+                    return 'both'
+            if lang == for_this_lang:
+                return 'ancestors'
+            return lang_rules(lang)
+        return what_we_want
     graph = explore_word_graph(edges_df, vertex_df, starter, 
-                               lang_rules=lang_policy, word_rules=_word_rules, template_rules=_template_rules, 
-                               max_vertices=500)
+                               max_depth=5,
+                               lang_rules=lang_policy(orig_lang), word_rules=_word_rules, template_rules=_template_rules, 
+                               max_vertices=100)
     print(_usage_log)
     pruned_graph = prune_leaves(graph, {'en'}, max_iterations=10) # {'en', 'es', 'osp', 'la', 'enm', 'ine-pro', 'gmw-pro'})
     graph_sugiyama_improved(pruned_graph)
+    # graph_dagre(pruned_graph)
 
     from networkx.readwrite import json_graph
     data = json_graph.node_link_data(pruned_graph)
-    print(data)
+    # print(data)
     # x = input("Press Enter to exit")
     # print(x)
