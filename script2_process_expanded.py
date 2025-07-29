@@ -92,7 +92,7 @@ def script_to_df_parquet(filepath, chunk_size = 1000000, max_chunks=None):
     def save_checkpoint(split):
         nonlocal collected
         df = pl.DataFrame(collected, schema_overrides=so)
-        df.write_parquet(f'data/parquet/ety_expanded_{split}.parquet')
+        df.write_parquet(f'data/step2/fragments/ety_expanded_{split}.parquet')
         collected = []
 
     split = 0
@@ -119,11 +119,11 @@ def script_to_df_parquet(filepath, chunk_size = 1000000, max_chunks=None):
 
 def script_condense_parquets():
     dfs = []
-    for filename in glob.glob(f'data/parquet/ety_expanded_*.parquet'):
+    for filename in glob.glob(f'data/step2/fragments/ety_expanded_*.parquet'):
         df = pl.read_parquet(filename)
         dfs.append(df)
     df = pl.concat(dfs)
-    df.write_parquet('data/parquet/ety_expanded.parquet')
+    df.write_parquet('data/step2/ety_expanded.parquet')
     return df
 
         
@@ -134,7 +134,7 @@ def script_generate_schema(col_name: str):
     # related
     # descendants
     sample_jsons = []
-    for filename in glob.glob('data/parquet/*.parquet'):
+    for filename in glob.glob('data/step2/*.parquet'):
         df = pl.read_parquet(filename)
         jsons = df[col_name].to_list()
         sample_jsons.extend(jsons)
@@ -153,9 +153,10 @@ if __name__ == '__main__':
 
     # script_condense_parquets()
     # exit(0)
-    df_dest = 'data/parquet/ety_expanded.parquet'
+    os.makedirs('data/step2/fragments', exist_ok=True)
+    df_dest = 'data/step2/ety_expanded.parquet'
     if not os.path.exists(df_dest):
-        script_to_df_parquet('D:/etytreealg/raw-wiktextract-data.json.gz') # , max_chunks=10)
+        script_to_df_parquet('data/raw/raw-wiktextract-data.json.gz') # , max_chunks=10)
     else:
         print("Data already exists. Loading.")
         df = pl.read_parquet(df_dest)
@@ -197,7 +198,7 @@ if __name__ == '__main__':
     # 916730
 
     # s = script_generate_schema()
-    if not os.path.exists('data/parquet/templates_schema.json'):
+    if not os.path.exists('data/step2/templates_schema.json'):
         templates_schema = script_generate_schema('templates')
         related_schema = script_generate_schema('related')
         descendants_schema = script_generate_schema('descendants')
@@ -205,18 +206,18 @@ if __name__ == '__main__':
         # print(related_schema)
         # print(descendants_schema)
 
-        with open('data/parquet/templates_schema.json', 'w') as f:
+        with open('data/step2/templates_schema.json', 'w') as f:
             json.dump(templates_schema, f)
-        with open('data/parquet/related_schema.json', 'w') as f:
+        with open('data/step2/related_schema.json', 'w') as f:
             json.dump(related_schema, f)
-        with open('data/parquet/descendants_schema.json', 'w') as f:
+        with open('data/step2/descendants_schema.json', 'w') as f:
             json.dump(descendants_schema, f)
     else:
-        with open('data/parquet/templates_schema.json', 'r') as f:
+        with open('data/step2/templates_schema.json', 'r') as f:
             templates_schema = json.load(f)
-        with open('data/parquet/related_schema.json', 'r') as f:
+        with open('data/step2/related_schema.json', 'r') as f:
             related_schema = json.load(f)
-        with open('data/parquet/descendants_schema.json', 'r') as f:
+        with open('data/step2/descendants_schema.json', 'r') as f:
             descendants_schema = json.load(f)
     
     # doesn't work

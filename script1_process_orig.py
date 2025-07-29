@@ -60,7 +60,7 @@ def extract_word_info(xml_file):
             root.clear()  # Free up memory
 
 if __name__ == '__main__':
-    xml_file = 'enwiktionary-20240501-pages-articles.xml'
+    xml_file = 'data/raw/enwiktionary-20240501-pages-articles.xml'
     # xml_file = 'enwiktionary-20240501-pages-articles.xml'
     data = []
     for word, language, etymology_number, etymology_text in extract_word_info(xml_file):
@@ -72,10 +72,10 @@ if __name__ == '__main__':
         if len(data) % 10000 == 0:
             # save to file
             df = pd.DataFrame(data, columns=["word", "lang", "etymology_number", "etymology_text"])
-            df.to_csv('wikitexts.csv', mode='a', header=False, index=False)
+            df.to_csv('data/step1/wikitexts.csv', mode='a', header=False, index=False)
             data = []
             del df
     # save the remaining data
-    with open('wikitexts.csv', 'a', encoding='utf-8') as f:
+    with open('data/step1/wikitexts.csv', 'a', encoding='utf-8') as f:
         df = pd.DataFrame(data, columns=["word", "lang", "etymology_number", "etymology_text"])
         df.to_csv(f, mode='a', header=False, index=False)

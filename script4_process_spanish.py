@@ -7,7 +7,7 @@ from etytreealg.graph.graph_construct import construct_descendant_edges_df, cons
 from etytreealg.graph.graph_io import hydrate_df
 
 def probe_language_dependents():
-    df = pl.read_parquet('data/parquet/ety_expanded.parquet')
+    df = pl.read_parquet('data/step2/ety_expanded.parquet')
     df = df.with_row_index("index")
     print("Loaded!")
     df = hydrate_df(df)
@@ -24,7 +24,7 @@ def probe_language_dependents():
 def main():
     # probe_language_dependents()
 
-    df = pl.read_parquet('data/parquet/ety_expanded.parquet')
+    df = pl.read_parquet('data/step2/ety_expanded.parquet')
 
     forms_of_df = construct_forms_of_df(df)
     forms_of_df.write_parquet('data/parquet/spanish_forms_of.parquet')

@@ -3,7 +3,7 @@ import polars as pl
 def script_lemma_reducible():
 
     # get etymology-less words
-    df = pl.read_parquet('data/parquet/ety_expanded.parquet')
+    df = pl.read_parquet('data/step2/ety_expanded.parquet')
     df = df.filter([
         (pl.col('num_templates') == 0)
         & pl.col('descendants').is_null()
@@ -87,7 +87,7 @@ def script_lemma_reducible():
 if __name__ == '__main__':
     print("Reading Parquet files...")
     script_lemma_reducible()
-    # vertex_df = pl.read_parquet('data/parquet/ety_expanded.parquet')
+    # vertex_df = pl.read_parquet('data/step2/ety_expanded.parquet')
     
 
     # of_interest = vertex_df.filter(
