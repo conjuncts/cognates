@@ -33,9 +33,18 @@ def make_vertices():
     print(f"Max vert_id: {max_vert_id}")
 
     weak_edges_df = pl.read_parquet("data/step4/weak_edges.parquet")
-    unassigned_df = weak_edges_df.filter(
-        pl.col("peer_id").is_null()
-    ).select("peer_word", "peer_lang").unique(maintain_order=True).rename({
+    if 'peer_id' in weak_edges_df.columns:
+        unassigned_df = weak_edges_df.filter(
+            pl.col("peer_id").is_null()
+        ).select("peer_word", "peer_lang").unique(maintain_order=True)
+    else:
+        unassigned_df = weak_edges_df.select("peer_word", "peer_lang").join(
+            word_df.select("word", "lang_code"),
+            left_on=["peer_word", "peer_lang"],
+            right_on=["word", "lang_code"],
+            how="anti"
+        )
+    unassigned_df= unassigned_df.rename({
         "peer_word": "word",
         "peer_lang": "lang_code"
     }).with_columns(
@@ -59,15 +68,20 @@ def make_edges():
         "entry_id", "vert_id"
     )
 
+    # NOTE: known outlier
+    weak_edges = weak_edges.filter(
+        pl.col("peer_word") != "Sino-Korean"
+    )
+
     # fix peer ids
-    edges_df = weak_edges.drop("peer_id").join(
+    edges_df = weak_edges.drop("peer_id", strict=False).join(
         wordlang2vert.rename({
             "vert_id": "peer_id",
         }),
         left_on=["peer_word", "peer_lang"],
         right_on=["word", "lang_code"],
         how="left"
-    ).drop(["peer_word", "peer_lang"])
+    )
 
     # fix host ids
     edges_df = edges_df.rename({
@@ -79,12 +93,20 @@ def make_edges():
         left_on="host_entry_id",
         right_on="entry_id",
         how="left"
-    ).drop("host_entry_id")
+    ).drop("host_entry_id").with_columns(
+        (pl.col("peer_word").str.starts_with("-")
+         | pl.col("peer_word").str.ends_with("-")
+        ).alias("affix")
+    )
 
+    
+
+    edges_df.write_parquet("data/step4/edges_debug.parquet")
+    edges_df = edges_df.drop(["peer_word", "peer_lang", "palt_word", "palt_lang"])
     edges_df.write_parquet("data/step4/edges.parquet")
 
 
 
 if __name__ == "__main__":
-    make_vertices()
+    # make_vertices()
     make_edges()

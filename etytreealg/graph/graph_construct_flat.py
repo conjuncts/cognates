@@ -5,38 +5,6 @@ from etytreealg.decode.decode_words import decode_langcode, decode_word, decode_
 from etytreealg.decode import langcodes as langcodes
 
 
-def most_common_referenced_languages(df, src_langcode, sortme=True, hreadable=False, need_subset=False):
-    lang_freqs = {}
-    if need_subset:
-        subset = df.filter(pl.col("lang_code") == src_langcode)
-    else:
-        subset = df
-    for templates in tqdm(subset["templates_h"]):
-        if not templates:
-            continue
-        for template in templates:
-            langs, words = get_langcodes_and_words(template['name'], template['args'], src_langcode)
-            for lang in langs:
-                if lang not in lang_freqs:
-                    lang_freqs[lang] = 0
-                lang_freqs[lang] += 1
-    if hreadable:
-        _result = {}
-        for k, v in lang_freqs.items():
-            name = langcodes.langcode_to_name(k)
-            if name:
-                if name in _result:
-                    _result[name] += v
-                else:
-                    _result[name] = v
-            else:
-                _result[k] = v
-        lang_freqs = _result
-    if sortme:
-        lang_freqs = {k: v for k, v in sorted(lang_freqs.items(), key=lambda item: item[1], reverse=True)}
-
-    return lang_freqs
-
 def construct_descendant_edges_flat_df(entry_df: pl.DataFrame, descendants_df: pl.DataFrame):
     """
     Flat version of construct_descendant_edges_df.
@@ -132,7 +100,7 @@ def construct_descendant_edges_flat_df(entry_df: pl.DataFrame, descendants_df: p
     
     # Drop duplicates and add metadata
     edges_df = edges_df.with_columns([
-        pl.lit(True).alias("is_desc")
+        pl.lit('desc').alias("edge_type")
     ])
     
     return edges_df
@@ -196,94 +164,61 @@ def construct_edges_flat_df(entry_df: pl.DataFrame, templates_df: pl.DataFrame):
 
     # drop duplicates in all columns
     edges_df = edges_df.with_columns([
-        pl.lit(False).alias("is_desc")
+        pl.lit('normal').alias("edge_type")
     ])
     # del edges
     return edges_df
 
-def construct_related_edges_df(target_df):
-    view = target_df[['lang', 'lang_code', 'word', 'related_h']]
+def construct_related_edges_flat_df(related_df: pl.DataFrame):
+    """
+    Note: related words are often NOT direct etymological ancestors/descendants 
+    (more like cousins/cognates). Not needed for graph construction.
+    See step3/related_flat.parquet
+    """
+
+
+def construct_forms_of_flat_df(entry_df: pl.DataFrame):
+    """
+    Flat version of construct_forms_of_df.
+    Works with forms_of data.
+    
+    Args:
+        entry_df: DataFrame with entry_id, lang_code, word columns
+    """
+    view = entry_df.select('entry_id', 'lang_code', 'forms_of').filter(
+        pl.col('forms_of').is_not_null()
+    ).explode("forms_of").select(
+        "entry_id", "lang_code", "forms_of"
+    )
+    # view = view.head(10)
+
     edges = {
-        'host_word': [],
-        'host_lang': [],
-        'host_ety': [],
-        'other_word': [],
-        'other_lang': [],
-        'replaced_other_word': [],
-        'replaced_other_lang': [],
+        'host_id': [],
+        'peer_word': [],
+        'peer_lang': [],
+        'palt_word': [],
+        'palt_lang': [],
         'template_name': []
     }
 
-    for j, (host_lang, host_langcode, host_word, related_words) in enumerate(tqdm(view.iter_rows(), total=view.height)):
-        if not related_words:
+    for host_id, host_langcode, related_word in tqdm(view.iter_rows(), total=view.height):
+
+        langcode = host_langcode
+        decoded_word, decoded_langcode = decode_word_langcode(related_word, langcode)
+        if not decoded_word.strip():
             continue
-        for word_item in related_words:
-            langcode = host_langcode
-            if not 'word' in word_item:
-                continue
-            word = word_item['word']
-            decoded_word, decoded_langcode = decode_word_langcode(word, langcode)
-            if not decoded_word.strip():
-                continue
-            edges['host_word'].append(host_word)
-            edges['host_lang'].append(host_langcode)
-            edges['host_ety'].append(0) # descendant['depth'])
-            edges['other_word'].append(decoded_word)
-            edges['other_lang'].append(decoded_langcode)
-            edges['replaced_other_lang'].append(langcode if langcode != decoded_langcode else None)
-            edges['replaced_other_word'].append(word if word != decoded_word else None)
-            edges['template_name'].append('form of')
-    print("Unexpected templates:")
-    # print(unexpected_templates)
+        edges['host_id'].append(host_id)
+        edges['peer_word'].append(decoded_word)
+        edges['peer_lang'].append(decoded_langcode)
+        edges['palt_word'].append(related_word if related_word != decoded_word else None)
+        edges['palt_lang'].append(langcode if langcode != decoded_langcode else None)
+        edges['template_name'].append('form of')
 
-    edges_df = pl.DataFrame(edges)
+    edges_df = pl.DataFrame(edges).lazy()
 
-    # drop duplicates in all columns
-    edges_df = edges_df.unique(maintain_order=True).with_columns([
-        pl.lit(False).alias("is_desc")
+    edges_df = edges_df.with_columns([
+        pl.lit("lemma").alias("edge_type")
     ])
-    # del edges
-    return edges_df
-
-
-def construct_forms_of_df(target_df):
-    view = target_df[['lang', 'lang_code', 'word', 'forms_of']]
-
-    edges = {
-        'host_word': [],
-        'host_lang': [],
-        'host_ety': [],
-        'other_word': [],
-        'other_lang': [],
-        'replaced_other_word': [],
-        'replaced_other_lang': [],
-        'template_name': []
-    }
-
-    for j, (host_lang, host_langcode, host_word, related_words) in enumerate(tqdm(view.iter_rows(), total=view.height)):
-        if not related_words:
-            continue
-        for word in related_words:
-            langcode = host_langcode
-            decoded_word, decoded_langcode = decode_word_langcode(word, langcode)
-            if not decoded_word.strip():
-                continue
-            edges['host_word'].append(host_word)
-            edges['host_lang'].append(host_langcode)
-            edges['host_ety'].append(None) # descendant['depth'])
-            edges['other_word'].append(decoded_word)
-            edges['other_lang'].append(decoded_langcode)
-            edges['replaced_other_lang'].append(langcode if langcode != decoded_langcode else None)
-            edges['replaced_other_word'].append(word if word != decoded_word else None)
-            edges['template_name'].append('form of')
-    print("Unexpected templates:")
-    # print(unexpected_templates)
-
-    edges_df = pl.DataFrame(edges)
-
-    # drop duplicates in all columns
-    edges_df = edges_df.unique(maintain_order=True).with_row_index("edge_id").with_columns([
-        pl.lit(False).alias("is_desc")
-    ])
-    # del edges
+    
+    # edges_df = edges_df.collect()
     return edges_df
