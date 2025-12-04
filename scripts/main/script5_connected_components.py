@@ -2,6 +2,88 @@ import polars as pl
 from collections import defaultdict
 
 
+def exclude_leaves():
+    vert_df = pl.read_parquet("data/step4/vertices.parquet")
+    edge_df = pl.read_parquet("data/step4/edges_debug.parquet")
+    # Calculate degree for each vertex (treating as undirected)
+    # Count how many times each vertex appears as peer_id
+    peer_counts = edge_df.group_by("peer_id").agg(
+        pl.len().alias("peer_degree"),
+    ).rename({"peer_id": "vert_id"})
+    
+    # Count how many times each vertex appears as host_id
+    host_counts = edge_df.group_by("host_id").agg(
+        pl.len().alias("host_degree"),
+        pl.col("edge_type").filter(pl.col("edge_type") == "lemma").len().alias("host_lemma_degree")
+    ).rename({"host_id": "vert_id"})
+    
+    # Combine to get total degree
+    degree_df = peer_counts.join(host_counts, on="vert_id", how="outer_coalesce")
+    degree_df = degree_df.with_columns([
+        pl.col("peer_degree").fill_null(0),
+        pl.col("host_lemma_degree").fill_null(0),
+        pl.col("host_degree").fill_null(0)
+    ])
+    # degree_df = degree_df.with_columns(
+    #     (pl.col("peer_degree") + pl.col("host_degree")).alias("total_degree")
+    # )
+
+    # if host_degree == host_lemma_degree == 1 and peer_degree == 0, then we have a leaf (likely a lemma)
+    # which is not very useful
+
+    leaf_df = degree_df.filter(
+        (
+            (pl.col("host_degree") == pl.col("host_lemma_degree")) & 
+            (pl.col("host_lemma_degree") > 0) & 
+            (pl.col("peer_degree") == 0)
+        )
+    )
+    # .join(
+    #     vert_df,
+    #     on="vert_id",
+    #     how="left",
+    # ) 
+    # 4.720 million
+
+    print(f"Excluding {leaf_df.height} leaf nodes")
+
+    vert_df = vert_df.join(
+        leaf_df,
+        on="vert_id",
+        how="anti"
+    )
+    vert_df.write_parquet("data/step5/vertices.parquet")
+    edge_df = edge_df.join(
+        leaf_df,
+        left_on="host_id",
+        right_on="vert_id",
+        how="anti"
+    )
+
+    # exclude more bad stuff
+    edge_df = edge_df.filter(
+        # (pl.col("template_name") == "m") & (
+        ~pl.col("peer_word").is_in([
+            "形聲",
+            "連濁",
+            "連用形",
+            "訓蒙字會 / 훈몽자회"
+        ])
+        # )
+    )
+
+    edge_df.write_parquet("data/step5/edges_debug.parquet")
+
+    edge_df = edge_df.drop("peer_word", "peer_lang", "palt_word", "palt_lang")
+    edge_df.write_parquet("data/step5/edges.parquet")
+
+    degree_df.join(
+        leaf_df,
+        on="vert_id",
+        how="anti",
+    ).write_parquet("data/step5/degrees.parquet")
+
+
 class UnionFind:
     """Union-Find data structure for finding connected components."""
     
@@ -69,6 +151,40 @@ def find_connected_components(vert_df, edge_df):
     # Initialize Union-Find
     uf = UnionFind(n_vertices)
     
+    # NOTE: for components to be meaningful, 
+    # Exclude affixes for component calculation (they are far too connected)
+    edge_df = edge_df.filter(
+        ~pl.col("affix")
+    ).filter(
+        ~pl.col("template_name").is_in([
+            "translit",
+            "transliteration",
+            "m",
+            "m+",
+            "m-lite",
+            "l",
+            "ll",
+            "noncog",
+            "nc",
+            "ncog",
+            "cog",
+            "cog-lite",
+
+            "con",
+            "sortkey",
+
+            "etymid",
+            "senseid",
+
+            "confix",
+            "blend",
+            "affix",
+            "prefix",
+            "suffix",
+        ])
+    )
+
+
     # Process all edges - treat graph as undirected for connected components
     edges = edge_df.select(["peer_id", "host_id"]).unique()
     
@@ -105,14 +221,11 @@ def find_connected_components(vert_df, edge_df):
     return result_df
 
 
+
 def main():
-    vert_df = pl.read_parquet("data/step4/vertices.parquet")
-    edge_df = pl.read_parquet("data/step4/edges.parquet")
-    
-    print("Vertices:")
-    print(vert_df)
-    print("\nEdges:")
-    print(edge_df)
+    vert_df = pl.read_parquet("data/step5/vertices.parquet")
+    edge_df = pl.read_parquet("data/step5/edges.parquet")
+
     
     # Find connected components
     conn_df = find_connected_components(vert_df, edge_df)
@@ -126,30 +239,36 @@ def main():
     print(f"\nSaved component mapping to: {output_path}")
     
 
-def inspect_comp5():
+def inspect_fishy():
     """
-    Component 5 has 2.9 million nodes.
+    Component 1 has 2.5 million nodes.
     Could something fishy be going on?
     """
     # Load data
-    vert_df = pl.read_parquet("data/step4/vertices.parquet")
-    edge_df = pl.read_parquet("data/step4/edges.parquet")
+    vert_df = pl.read_parquet("data/step5/vertices.parquet")
+    edge_df = pl.read_parquet("data/step5/edges.parquet").filter(
+        ~pl.col("affix")
+    )
     conn_df = pl.read_parquet("data/step5/components.parquet")
+
+    fishy_id = conn_df.group_by("conn_id").agg(
+        pl.len().alias("size")
+    ).sort("size", descending=True).select("conn_id").head(1).item()
     
     # Filter to component 5
-    comp5_verts = conn_df.filter(pl.col("conn_id") == 5)
+    comp5_verts = conn_df.filter(pl.col("conn_id") == fishy_id)
     comp5_vert_ids = comp5_verts["vert_id"]
     
-    print(f"Component 5 has {len(comp5_verts)} vertices")
+    print(f"Component {fishy_id} has {len(comp5_verts)} vertices")
     
     # Get edges within component 5
     comp5_edges = edge_df.filter(
         pl.col("peer_id").is_in(comp5_vert_ids) | 
         pl.col("host_id").is_in(comp5_vert_ids)
     )
-    
-    print(f"Component 5 has {len(comp5_edges)} edges")
-    
+
+    print(f"Component {fishy_id} has {len(comp5_edges)} edges")
+
     # Calculate degree for each vertex (treating as undirected)
     # Count how many times each vertex appears as peer_id
     peer_counts = comp5_edges.group_by("peer_id").agg(
@@ -172,15 +291,17 @@ def inspect_comp5():
     )
     
     # Get top 10 most connected nodes
-    top_nodes = degree_df.sort("total_degree", descending=True).head(10)
+    top_nodes = degree_df.filter(
+        pl.col("peer_degree") > 500
+    ).sort("peer_degree", descending=True)
     
     # Join with vertex info to see what these nodes are
-    top_nodes_info = top_nodes.join(vert_df, on="vert_id", how="left")
+    top_nodes_info = top_nodes.join(vert_df, on="vert_id", how="left").drop("entry_id").unique(maintain_order=True)
     
     print("\n" + "="*80)
     print("TOP 10 MOST CONNECTED NODES IN COMPONENT 5:")
     print("="*80)
-    print(top_nodes_info.select(["vert_id", "word", "lang_code", "total_degree", "peer_degree", "host_degree"]))
+    print(top_nodes_info)
     
     # Show some example edges for the most connected node
     if len(top_nodes_info) > 0:
@@ -214,83 +335,16 @@ def inspect_comp5():
             how="left"
         ).rename({"word": "host_word", "lang_code": "host_lang"})
         
-        print(sample_edges.select([
-            "edge_id", "template_name", "is_desc",
-            "peer_id", "peer_word", "peer_lang",
-            "host_id", "host_word", "host_lang"
-        ]))
-
-def exclude_leaves():
-    vert_df = pl.read_parquet("data/step4/vertices.parquet")
-    edge_df = pl.read_parquet("data/step4/edges_debug.parquet")
-    # Calculate degree for each vertex (treating as undirected)
-    # Count how many times each vertex appears as peer_id
-    peer_counts = edge_df.group_by("peer_id").agg(
-        pl.len().alias("peer_degree"),
-    ).rename({"peer_id": "vert_id"})
-    
-    # Count how many times each vertex appears as host_id
-    host_counts = edge_df.group_by("host_id").agg(
-        pl.len().alias("host_degree"),
-        pl.col("edge_type").filter(pl.col("edge_type") == "lemma").len().alias("host_lemma_degree")
-    ).rename({"host_id": "vert_id"})
-    
-    # Combine to get total degree
-    degree_df = peer_counts.join(host_counts, on="vert_id", how="outer_coalesce")
-    degree_df = degree_df.with_columns([
-        pl.col("peer_degree").fill_null(0),
-        pl.col("host_lemma_degree").fill_null(0),
-        pl.col("host_degree").fill_null(0)
-    ])
-    # degree_df = degree_df.with_columns(
-    #     (pl.col("peer_degree") + pl.col("host_degree")).alias("total_degree")
-    # )
-
-    # if host_degree == host_lemma_degree == 1 and peer_degree == 0, then we have a leaf (likely a lemma)
-    # which is not very useful
-
-    leaf_df = degree_df.filter(
-        (
-            (pl.col("host_degree") == pl.col("host_lemma_degree")) & 
-            (pl.col("host_lemma_degree") > 0) & 
-            (pl.col("peer_degree") == 0)
-        )
-    )
-    # .join(
-    #     vert_df,
-    #     on="vert_id",
-    #     how="left",
-    # ) 
-    # 4.720 million
-
-    print(f"Excluding {leaf_df.height} leaf nodes")
-
-    vert_df = vert_df.join(
-        leaf_df,
-        on="vert_id",
-        how="anti"
-    )
-    vert_df.write_parquet("data/step5/vertices.parquet")
-    edge_df = edge_df.join(
-        leaf_df,
-        left_on="host_id",
-        right_on="vert_id",
-        how="anti"
-    )
-    edge_df.write_parquet("data/step5/edges_debug.parquet")
-
-    edge_df = edge_df.drop("peer_word", "peer_lang", "palt_word", "palt_lang")
-    edge_df.write_parquet("data/step5/edges.parquet")
-
-    degree_df.join(
-        leaf_df,
-        on="vert_id",
-        how="anti",
-    ).write_parquet("data/step5/degrees.parquet")
+        print(sample_edges)
 
 
 
 if __name__ == "__main__":
-    exclude_leaves()
-    # main()
-    # inspect_comp5()
+    # exclude_leaves()
+
+    # df = pl.read_parquet("data/step5/edges.parquet")
+    # print(df)
+
+    # Suspicious: "-ly" (137978)
+    main()
+    inspect_fishy()
