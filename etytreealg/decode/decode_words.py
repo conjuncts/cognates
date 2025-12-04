@@ -108,6 +108,9 @@ def decode_word_langcode(word: str, langcode: str | None):
     """
     Decode a word and langcode into something which may be found
     """
+    # if word is None:
+        # empty word, don't let it break
+        # return '', langcode
     decoded_langcode = decode_langcode(langcode)
     decoded_word = decode_word(word, langcode=decoded_langcode)
     return decoded_word, decoded_langcode
