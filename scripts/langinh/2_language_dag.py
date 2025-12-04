@@ -10,7 +10,7 @@ def produce_graph():
     df = df.group_by("lang", "origin_lang").len().filter(
         pl.col("len") > 40
     )
-    print(df)
+    # print(df)
 
     # Create a directed graph
     G = nx.DiGraph()
@@ -22,19 +22,41 @@ def produce_graph():
     return G
 
 
-def filter_by_language(G, language="Proto-Indo-European"):
+def filter_by_language(G, language="Proto-Indo-European", plus_ancestors=False):
     descendants = nx.descendants(G, language)
     nodes_to_keep = descendants | {language}
+    # ancestors = nx.ancestors(G, language)
+    if plus_ancestors:
+        ancestors = nx.ancestors(G, language)
+        nodes_to_keep = descendants | ancestors | {language}
     return G.subgraph(nodes_to_keep).copy()
 
 
 def main():
     G = produce_graph()
 
-    # root = "Proto-Indo-European"
-    root = "Proto-Germanic"
-    # root = "Proto-West Germanic"
-    G = filter_by_language(G, language=root)
+    # lang = "Proto-Indo-European"
+    lang = "Proto-Germanic"
+    # lang = "Proto-West Germanic"
+    # lang = "Proto-Sino-Tibetan"
+    lang = "Proto-Italic"
+    lang = "Proto-Afroasiatic"
+    lang = "Proto-Turkic"
+    lang = "Proto-Japonic"
+    lang = "Proto-Austroasiatic"
+    lang = "Proto-Uralic"
+
+    # plus_ancestors = True
+    plus_ancestors = False
+    G = filter_by_language(G, language=lang, plus_ancestors=plus_ancestors)
+
+    # get root as all with in-degree 0
+    roots = [n for n, d in G.in_degree() if d == 0]
+    if len(roots) == 1:
+        root = roots[0]
+    else:
+        print("Multiple roots found, using first:", roots)
+        root = roots[0]
 
     # Create visualization
     fig, ax = visualize_language_inheritance_graph(G, root, figsize=(20, 16))
