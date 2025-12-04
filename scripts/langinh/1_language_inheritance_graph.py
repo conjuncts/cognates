@@ -206,11 +206,128 @@ def spring_with_gravity(G, gravity_strength=0.1, vertical=False, **kwargs):
 
     return pos
 
+def x_only_spring_layout(G: nx.DiGraph, pos=None, iterations=50, k=None, spring_strength_scale=1.0, 
+                        damping=0.1, seed=42):
+    """
+    Force-directed spring layout where nodes can ONLY move in the x direction.
+    Spring strength is based on edge weight and only considers x displacement.
+    
+    Args:
+        G: The directed graph
+        pos: Initial positions (if None, uses noisy_hierarchical_layout)
+        iterations: Number of iterations to run
+        k: Optimal distance between nodes (if None, computed automatically)
+        spring_strength_scale: Multiplier for spring strength based on edge weights
+        damping: Damping factor to prevent oscillation (0-1)
+        seed: Random seed for reproducibility
+    """
+    np.random.seed(seed)
+    
+    # Initialize positions if not provided
+    if pos is None:
+        pos = noisy_hierarchical_layout(G, seed=seed)
+    else:
+        pos = pos.copy()
+    
+    # Convert to numpy arrays for easier computation
+    nodes = list(G.nodes())
+    n_nodes = len(nodes)
+    node_to_idx = {node: i for i, node in enumerate(nodes)}
+    
+    # Extract x,y coordinates
+    x_coords = np.array([pos[node][0] for node in nodes])
+    y_coords = np.array([pos[node][1] for node in nodes])  # These stay fixed
+    
+    # Calculate optimal distance if not provided
+    if k is None:
+        # Use the same logic as networkx spring layout
+        k = np.sqrt(1.0 / n_nodes)
+    
+    # Main iteration loop
+    for iteration in range(iterations):
+        # Initialize forces (only x-direction forces)
+        forces_x = np.zeros(n_nodes)
+        
+        # Calculate spring forces from edges
+        for u, v, data in G.edges(data=True):
+            u_idx = node_to_idx[u]
+            v_idx = node_to_idx[v]
+            
+            # Get edge weight (default to 1 if not present)
+            weight = data.get('weight', 1)
+            
+            # Calculate x displacement only
+            dx = x_coords[v_idx] - x_coords[u_idx]
+            
+            # Skip if nodes are at exactly the same x position
+            if abs(dx) < 1e-6:
+                continue
+            
+            # Spring force (Hooke's law): F = -k * (distance - optimal)
+            # We want connected nodes to be attracted to optimal distance
+            optimal_distance = k / np.sqrt(weight)  # Closer for higher weights
+            
+            # Force magnitude based on deviation from optimal distance
+            force_magnitude = spring_strength_scale * weight * (abs(dx) - optimal_distance)
+            
+            # Force direction: attract if too far, repel if too close
+            if abs(dx) > optimal_distance:
+                # Too far apart - attract
+                force_direction = -np.sign(dx)
+            else:
+                # Too close - repel  
+                force_direction = np.sign(dx)
+            
+            force_x = force_magnitude * force_direction
+            
+            # Apply equal and opposite forces
+            forces_x[u_idx] += force_x
+            forces_x[v_idx] -= force_x
+        
+        # Calculate repulsion forces between all node pairs
+        # for i in range(n_nodes):
+        #     for j in range(i + 1, n_nodes):
+        #         dx = x_coords[j] - x_coords[i]
+                
+        #         # Skip if nodes are at exactly the same x position
+        #         if abs(dx) < 1e-6:
+        #             continue
+                
+        #         # Repulsion force: F = k^2 / distance
+        #         distance = abs(dx)
+        #         repulsion_magnitude = k * k / distance
+                
+        #         # Repulsion force direction
+        #         force_direction = np.sign(dx)
+                
+        #         # Apply repulsion forces
+        #         forces_x[i] -= repulsion_magnitude * force_direction
+        #         forces_x[j] += repulsion_magnitude * force_direction
+        
+        # Apply forces with damping
+        # Limit maximum displacement to prevent instability
+        max_displacement = k / 4.0
+        forces_x = np.clip(forces_x * damping, -max_displacement, max_displacement)
+        
+        # Update x positions only
+        x_coords += forces_x
+        
+        # Optional: Add some cooling (reduce damping over time)
+        if iteration > iterations * 0.5:
+            damping *= 0.99
+    
+    # Convert back to position dictionary
+    new_pos = {}
+    for i, node in enumerate(nodes):
+        new_pos[node] = (x_coords[i], y_coords[i])
+    
+    return new_pos
+
 def visualize_inheritance_graph(
         G, 
         relevance_df,
         title="Language Inheritance Graph", 
-        layout: Literal["hier", "spring", "gravity", "noisy-hier"] = "noisy-hier"):
+        layout: Literal["hier", "spring", "gravity", "noisy-hier", "x-spring"] = "noisy-hier"):
     """Create a visualization of the language inheritance graph"""
     
     plt.figure(figsize=(16, 10))
@@ -248,6 +365,11 @@ def visualize_inheritance_graph(
         pos = hierarchical_layout(G)
     elif layout == "noisy-hier":
         pos = noisy_hierarchical_layout(G, noise_factor=0.5, seed=42)
+    elif layout == "x-spring":
+        # Start with noisy hierarchical layout, then apply x-only spring forces
+        initial_pos = noisy_hierarchical_layout(G, noise_factor=0.3, seed=42)
+        pos = x_only_spring_layout(G, pos=initial_pos, iterations=5, 
+                                  spring_strength_scale=0.5, damping=0.05, seed=42)
     elif layout == "spring":
         pos = nx.spring_layout(G, k=0.5, iterations=50, seed=42)
     elif layout == "gravity":
@@ -325,14 +447,14 @@ def create_focused_visualizations(lang_relations: pl.DataFrame, relevance: pl.Da
     """Create several focused visualizations"""
     
     # 1. English inheritance tree
-    # print("Creating English inheritance visualization...")
-    # english_relations = lang_relations.filter(pl.col('lang') == 'English')
-    # G_en, relations_en = create_inheritance_graph(english_relations, min_count=1)
+    print("Creating English inheritance visualization...")
+    english_relations = lang_relations.filter(pl.col('lang') == 'English')
+    G_en, relations_en = create_inheritance_graph(english_relations, min_count=1)
     
-    # plt1 = visualize_inheritance_graph(G_en, relations_en, 
-    #                                  "English Language Inheritance")
-    # plt1.savefig('data/english_inheritance.png', dpi=300, bbox_inches='tight')
-    # plt1.show()
+    plt1 = visualize_inheritance_graph(G_en, relevance, # relations_en, 
+                                     "English Language Inheritance")
+    plt1.savefig('data/english_inheritance.png', dpi=300, bbox_inches='tight')
+    plt1.show()
     
     # 2. Top languages overall
     print("Creating overall language relationships...")
@@ -405,6 +527,8 @@ def main():
     
     print("Loading language inheritance data...")
     lang_relations, relevance = load_language_relations()
+    lang_relations.write_parquet("data/step3/language_inh.parquet")
+    exit(0)
 
     print(f"Loaded {len(lang_relations):,} language inheritance relationships")
     
@@ -417,4 +541,5 @@ def main():
     print("\nVisualization complete! Check the generated PNG files.")
 
 if __name__ == "__main__":
-    main()
+    # main()
+    raise ValueError("These visualizations are very bad. Use 2_language_dag.py instead.")
